@@ -68,7 +68,8 @@ android {
         main {
             java {
                 resources {
-                    srcDirs += files("$projectDir/../../node_modules/@duckduckgo/content-scope-scripts/build/android/".toString())
+//                    srcDirs += files("$projectDir/../../node_modules/@duckduckgo/content-scope-scripts/build/android/".toString())
+                    srcDirs += files("/Users/shaneosbourne/WebstormProjects/content-scope-scripts/build/android".toString())
                 }
             }
         }

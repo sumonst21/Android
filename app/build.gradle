@@ -248,6 +248,9 @@ dependencies {
     implementation project(':content-scope-scripts-api')
     implementation project(':content-scope-scripts-impl')
 
+    implementation project(':css-messaging-api')
+    implementation project(':css-messaging-impl')
+
     implementation project(':fingerprint-protection-api')
     implementation project(':fingerprint-protection-impl')
     implementation project(':fingerprint-protection-store')

@@ -188,6 +188,7 @@ import com.duckduckgo.autofill.api.domain.app.LoginCredentials
 import com.duckduckgo.autofill.api.domain.app.LoginTriggerType
 import com.duckduckgo.autofill.api.store.AutofillStore.ContainsCredentialsResult.*
 import com.duckduckgo.browser.api.brokensite.BrokenSiteData
+import com.duckduckgo.cssmessaging.api.CssMessaging
 import com.duckduckgo.di.scopes.FragmentScope
 import com.duckduckgo.downloads.api.DOWNLOAD_SNACKBAR_DELAY
 import com.duckduckgo.downloads.api.DOWNLOAD_SNACKBAR_LENGTH
@@ -370,6 +371,9 @@ class BrowserTabFragment :
 
     @Inject
     lateinit var autoconsent: Autoconsent
+
+    @Inject
+    lateinit var cssMessaging: CssMessaging
 
     @Inject
     lateinit var autofillSettingsActivityLauncher: AutofillSettingsActivityLauncher
@@ -1860,6 +1864,7 @@ class BrowserTabFragment :
             configureWebViewForAutofill(it)
             printInjector.addJsInterface(it) { viewModel.printFromWebView() }
             autoconsent.addJsInterface(it, autoconsentCallback)
+            cssMessaging.addJsInterface(it)
         }
 
         if (appBuildConfig.isDebug) {
