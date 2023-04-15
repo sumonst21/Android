@@ -17,10 +17,20 @@
 package com.duckduckgo.cssmessaging.api
 
 import android.webkit.WebView
+import org.json.JSONObject
 
 interface CssMessaging {
     /**
      * It requires a [WebView]
      */
     fun addJsInterface(webView: WebView)
+    /**
+     * Register a receiver for a particular featureName
+     */
+    fun registerReceiver(key: String, receiver: MessageReceiver)
+}
+
+typealias HandlerCallback = suspend (data: JSONObject) -> Map<String, Any>?;
+interface MessageReceiver {
+    fun receiverFor(name: String): HandlerCallback?
 }

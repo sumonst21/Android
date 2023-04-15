@@ -78,6 +78,8 @@ dependencies {
     implementation JakeWharton.timber
 
     implementation Square.retrofit2.converter.moshi
+    implementation Square.retrofit2.converter.moshi
+    implementation "com.squareup.moshi:moshi-kotlin:_"
     implementation Square.okHttp3.okHttp
 
     // Testing dependencies
