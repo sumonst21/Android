@@ -85,13 +85,20 @@ data class SetUserValues(
     val enabled: Boolean
 )
 
+sealed class Action {
+    data class Respond(val js: String) : Action()
+    object None : Action()
+    object Error : Action()
+}
+
 @ContributesBinding(AppScope::class)
 class RealCssMessaging @Inject constructor(
     @AppCoroutineScope private val appCoroutineScope: CoroutineScope,
-    private val dispatcher: DispatcherProvider,
+    private val dispatcher: DispatcherProvider
 ) : CssMessaging {
 
     private val receivers = mutableMapOf<String, MessageReceiver>()
+    private lateinit var webView: WebView
 
     override fun registerReceiver(key: String, receiver: MessageReceiver) {
         if (!receivers.containsKey(key)) {
@@ -103,7 +110,56 @@ class RealCssMessaging @Inject constructor(
         receivers.remove(key)
     }
 
-    fun separateParams(json: String): Pair<JSONObject, JSONObject> {
+
+    suspend fun onMessageReceived(json: String, url: String?): Action {
+        val senderHost = url?.toUri()?.host;
+        val (jsonObject, params) = separateParams(json)
+
+        val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
+        val adapter: JsonAdapter<Incoming> = moshi.adapter(Incoming::class.java)
+        val responseAdaptor: JsonAdapter<Response> = moshi.adapter(Response::class.java)
+
+        try {
+            val incoming = adapter.fromJson(jsonObject.toString()) ?: return Action.None;
+
+            // if the `id` is absent, we don't need to respond, so don't even look anything up
+            val id = incoming.id ?: return Action.None
+
+            // now try to lookup a receiver
+            val handlerFn = receivers[incoming.featureName]?.receiverFor(incoming.method) ?: return Action.None;
+
+            // a receiver was found, call it and wait for a return value
+            val handlerReturnValue = handlerFn(params) ?: mapOf<String, Any>();
+
+            // convert the response to a jsonValue
+            val resultAdaptor = toJsonAdapter(handlerReturnValue);
+            val jsonValue = resultAdaptor.toJsonValue(handlerReturnValue);
+
+            // create the spec-compliant full response
+            val response = Response.fromIncoming(incoming, id, jsonValue);
+            val jsonString = responseAdaptor.toJson(response);
+
+            // todo(Shane): Verify the origin is still matching - in JS?
+            val curr = webView.url?.toUri()?.host;
+            if (curr != senderHost) {
+                Timber.d("curr !== senderHost $curr : $senderHost")
+                return Action.None
+            }
+
+            val js = """
+                (() => {
+                    javascript:window["$id"]($jsonString, "$senderHost")
+                })()""".trimIndent();
+
+            return Action.Respond(js = js)
+
+        } catch (e: Exception) {
+            Timber.d(e);
+            return Action.Error
+        }
+    }
+
+    private fun separateParams(json: String): Pair<JSONObject, JSONObject> {
         val jsonObject = JSONObject(json)
 
         // pull params out, to deserialize separately later
@@ -111,7 +167,7 @@ class RealCssMessaging @Inject constructor(
             try {
                 jsonObject.get("params") as JSONObject
             } catch (e: Exception) {
-                Timber.d("shane: $e");
+                Timber.d("params failed: $e");
                 JSONObject()
             }
         } else {
@@ -121,81 +177,34 @@ class RealCssMessaging @Inject constructor(
         return jsonObject to params
     }
 
-    fun onMessageReceived(json: String, url: String) {
-        val senderHost = url.toUri().host;
-        val (jsonObject, params) = separateParams(json)
-
-        Timber.d("shane: $params");
-
-        val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
-        val adapter: JsonAdapter<Incoming> = moshi.adapter(Incoming::class.java)
-        val responseAdaptor: JsonAdapter<Response> = moshi.adapter(Response::class.java)
-
-        try {
-            val incoming = adapter.fromJson(jsonObject.toString()) ?: return;
-            val handlerFn = receivers[incoming.featureName]?.receiverFor(incoming.method);
-
-            if (handlerFn == null) {
-                Timber.d("receiver not found for $incoming");
-                return;
-            }
-
-            appCoroutineScope.launch(dispatcher.io()) {
-                val handlerReturnValue = handlerFn(params);
-
-                //if the `id` was absent, we don't need to respond
-                val id = incoming.id ?: return@launch;
-
-                if (handlerReturnValue !== null) {
-                    // convert the response to a jsonValue
-                    val resultAdaptor = toJsonAdapter(handlerReturnValue);
-                    val jsonValue = resultAdaptor.toJsonValue(handlerReturnValue);
-
-                    // create the spec-compliant full response
-                    val response = Response.fromIncoming(incoming, id, jsonValue);
-                    val jsonString = responseAdaptor.toJson(response);
-
-                    // todo(Shane): Verify the origin is still matching - in JS?
-                    withContext(dispatcher.main()) {
-                        val curr = webView.url?.toUri()?.host;
-                        if (curr != senderHost) {
-                            Timber.d("curr !== senderHost $curr : $senderHost")
-                            return@withContext;
-                        }
-                        val js = """
-                            (() => {
-                                javascript:window["$id"]($jsonString, "$senderHost")
-                            })()                            
-                            """.trimIndent();
-                        Timber.d("shane: executing $js")
-                        Timber.d("javascript:window['$id']($jsonString, window.origin)");
-                        webView.evaluateJavascript(js, null)
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            Timber.d("shane: $e");
-        }
-    }
-
-    lateinit var webView: WebView
-
     override fun addJsInterface(webView: WebView) {
         this.webView = webView;
-        Timber.d("hello world")
         webView.addJavascriptInterface(
-            CssMessagingJavascripttInterface(
-                handle = { newValue ->
-                    val url = runBlocking(dispatcher.main()) {
-                        webView.url
-                    };
-                    url?.let {
-                        onMessageReceived(newValue, it)
-                    }
+            CssMessagingJavascriptInterface { incomingString ->
+                // we need the URL, so that we can compare later
+                val url = runBlocking(dispatcher.main()) {
+                    webView.url
+                } ?: return@CssMessagingJavascriptInterface;
+
+                // now launch a coroutine to prevent this call from blocking
+                appCoroutineScope.launch {
+                    val action = onMessageReceived(incomingString, url)
+                    handleAction(action)
                 }
-            ),
-            CssMessagingJavascripttInterface.JAVASCRIPT_INTERFACE_NAME,
+            },
+            CssMessagingJavascriptInterface.JAVASCRIPT_INTERFACE_NAME,
         )
+    }
+
+    fun handleAction(action: Action) {
+        when(action) {
+            is Action.Respond -> runBlocking(dispatcher.main()) {
+                webView.evaluateJavascript(action.js, null)
+            }
+            else -> {
+                Timber.d("do nothing");
+            }
+        }
     }
 }
 
@@ -245,7 +254,7 @@ class DuckPlayer @Inject constructor(
     }
 }
 
-class CssMessagingJavascripttInterface(private val handle: (String) -> Unit) {
+class CssMessagingJavascriptInterface(val handle: (String) -> Unit) {
 
     @JavascriptInterface
     fun incoming(payload: String) {
