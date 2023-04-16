@@ -30,7 +30,7 @@ interface CssMessaging {
     fun registerReceiver(key: String, receiver: MessageReceiver)
 }
 
-typealias HandlerCallback = suspend (data: JSONObject) -> Map<String, Any>?;
+typealias HandlerCallback = suspend (data: JSONObject) -> Any?;
 interface MessageReceiver {
     fun receiverFor(name: String): HandlerCallback?
 }

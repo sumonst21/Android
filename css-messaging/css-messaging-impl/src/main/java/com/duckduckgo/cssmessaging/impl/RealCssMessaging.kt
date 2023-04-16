@@ -18,6 +18,7 @@ package com.duckduckgo.cssmessaging.impl
 
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
+import androidx.core.net.toUri
 import com.duckduckgo.app.di.AppCoroutineScope
 import com.duckduckgo.app.global.DispatcherProvider
 import com.duckduckgo.cssmessaging.api.CssMessaging
@@ -31,6 +32,7 @@ import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import timber.log.Timber
@@ -60,12 +62,12 @@ data class Notification(
 data class Response(
     val context: String,
     val featureName: String,
-    val result: Map<String, Any>,
+    val result: Any?,
     var error: ErrorMessage?,
     val id: String,
 ) {
     companion object {
-        fun fromIncoming(req: Incoming, id: String, result: Map<String, Any>): Response {
+        fun fromIncoming(req: Incoming, id: String, result: Any?): Response {
             return Response(
                 context = req.context,
                 featureName = req.featureName,
@@ -101,7 +103,7 @@ class RealCssMessaging @Inject constructor(
         receivers.remove(key)
     }
 
-    fun separateInput(json: String): Pair<JSONObject, JSONObject> {
+    fun separateParams(json: String): Pair<JSONObject, JSONObject> {
         val jsonObject = JSONObject(json)
 
         // pull params out, to deserialize separately later
@@ -119,8 +121,9 @@ class RealCssMessaging @Inject constructor(
         return jsonObject to params
     }
 
-    fun onMessageReceived(json: String) {
-        val (jsonObject, params) = separateInput(json)
+    fun onMessageReceived(json: String, url: String) {
+        val senderHost = url.toUri().host;
+        val (jsonObject, params) = separateParams(json)
 
         Timber.d("shane: $params");
 
@@ -130,26 +133,44 @@ class RealCssMessaging @Inject constructor(
 
         try {
             val incoming = adapter.fromJson(jsonObject.toString()) ?: return;
-            val handlerFn = receivers[incoming.featureName]?.receiverFor(incoming.method) ?: return;
+            val handlerFn = receivers[incoming.featureName]?.receiverFor(incoming.method);
+
+            if (handlerFn == null) {
+                Timber.d("receiver not found for $incoming");
+                return;
+            }
 
             appCoroutineScope.launch(dispatcher.io()) {
                 val handlerReturnValue = handlerFn(params);
 
-                // if the `id` was absent, we don't need to respond
+                //if the `id` was absent, we don't need to respond
                 val id = incoming.id ?: return@launch;
 
-                // if the handler gave no value, just use an empty map
-                val result = handlerReturnValue ?: mapOf();
+                if (handlerReturnValue !== null) {
+                    // convert the response to a jsonValue
+                    val resultAdaptor = toJsonAdapter(handlerReturnValue);
+                    val jsonValue = resultAdaptor.toJsonValue(handlerReturnValue);
 
-                // construct the response, based on the input + return values from function
-                val response = Response.fromIncoming(incoming, id, result);
+                    // create the spec-compliant full response
+                    val response = Response.fromIncoming(incoming, id, jsonValue);
+                    val jsonString = responseAdaptor.toJson(response);
 
-                // construct the response, based on the input + return values from function
-                val jsonString = responseAdaptor.toJson(response);
-
-                withContext(dispatcher.main()) {
-                    Timber.d("shane: OH SHIT $result")
-                    webView.evaluateJavascript("javascript:console.log('return:', $jsonString)", null)
+                    // todo(Shane): Verify the origin is still matching - in JS?
+                    withContext(dispatcher.main()) {
+                        val curr = webView.url?.toUri()?.host;
+                        if (curr != senderHost) {
+                            Timber.d("curr !== senderHost $curr : $senderHost")
+                            return@withContext;
+                        }
+                        val js = """
+                            (() => {
+                                javascript:window["$id"]($jsonString, "$senderHost")
+                            })()                            
+                            """.trimIndent();
+                        Timber.d("shane: executing $js")
+                        Timber.d("javascript:window['$id']($jsonString, window.origin)");
+                        webView.evaluateJavascript(js, null)
+                    }
                 }
             }
         } catch (e: Exception) {
@@ -165,7 +186,12 @@ class RealCssMessaging @Inject constructor(
         webView.addJavascriptInterface(
             CssMessagingJavascripttInterface(
                 handle = { newValue ->
-                    onMessageReceived(newValue)
+                    val url = runBlocking(dispatcher.main()) {
+                        webView.url
+                    };
+                    url?.let {
+                        onMessageReceived(newValue, it)
+                    }
                 }
             ),
             CssMessagingJavascripttInterface.JAVASCRIPT_INTERFACE_NAME,
@@ -173,20 +199,24 @@ class RealCssMessaging @Inject constructor(
     }
 }
 
+// Implement the JsonSerializable interface for the MoshiJsonSerializable typealias
+inline fun <reified T> toJsonAdapter(_input: T): JsonAdapter<T> {
+    val moshi = Moshi.Builder().build()
+    val type = T::class.java
+    return moshi.adapter(type)
+}
+
+data class Person(val name: String, val age: Int);
+
 @ContributesBinding(AppScope::class)
 class DuckPlayer @Inject constructor(
     private val dispatcher: DispatcherProvider,
 ) : MessageReceiver {
 
-    suspend fun h2(d: JSONObject): Map<String, Any> {
-        return withContext(dispatcher.io()) {
-            Timber.d("shane: before H2");
-            delay(1000);
-            Timber.d("shane: after H2");
-            mapOf(
-                "bar" to "baz"
-            )
-        }
+    data class UserValues(val playerMode: String);
+
+    fun getUserValues(d: JSONObject): UserValues {
+        return UserValues(playerMode = "enabled")
     }
 
     suspend fun h3(d: JSONObject): Map<String, Any> {
@@ -200,10 +230,16 @@ class DuckPlayer @Inject constructor(
         }
     }
 
+    fun pixel(d: JSONObject): Person? {
+        val p = Person(name = "shane", age = 38);
+        return p
+    }
+
     override fun receiverFor(name: String): HandlerCallback? {
         return when(name) {
-            "getUserValues" -> ::h2
+            "getUserValues" -> ::getUserValues
             "getUserValues2" -> ::h3
+            "pixel" -> ::pixel
             else -> null
         }
     }
