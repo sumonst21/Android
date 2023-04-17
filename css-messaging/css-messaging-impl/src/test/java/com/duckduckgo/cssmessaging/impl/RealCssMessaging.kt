@@ -79,10 +79,10 @@ class RealCssMessagingTest {
             put("featureName", "fooBarFeature")
             put("method", "helloWorld")
             put("id", "abcdef")
-        }.toString()
+        }
 
         // val mockCallback = mock<(Action?) -> Unit>()
-        val r = testee.onMessageReceived(incoming, null)
+        val actual = testee.onMessageReceived(incoming.toString(), null)
 
         val js = """
         (() => {
@@ -92,6 +92,6 @@ class RealCssMessagingTest {
 
         val expected = Action.Respond(js);
 
-        assertEquals(expected, r);
+        assertEquals(expected, actual);
     }
 }
