@@ -39,48 +39,6 @@ import timber.log.Timber
 import java.lang.Exception
 import javax.inject.Inject
 
-data class Incoming(
-    val context: String,
-    val featureName: String,
-    val method: String,
-    val id: String?,
-)
-
-data class Request(
-    val context: String,
-    val featureName: String,
-    val method: String,
-    val id: String,
-)
-
-data class Notification(
-    val context: String,
-    val featureName: String,
-    val method: String,
-)
-
-data class Response(
-    val context: String,
-    val featureName: String,
-    val result: Any?,
-    var error: ErrorMessage?,
-    val id: String,
-) {
-    companion object {
-        fun fromIncoming(req: Incoming, id: String, result: Any?): Response {
-            return Response(
-                context = req.context,
-                featureName = req.featureName,
-                id = id,
-                result = result,
-                error = null,
-            )
-        }
-    }
-}
-
-data class ErrorMessage(val message: String);
-
 data class SetUserValues(
     val enabled: Boolean
 )
