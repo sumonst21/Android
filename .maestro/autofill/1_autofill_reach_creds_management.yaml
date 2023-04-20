@@ -1,0 +1,9 @@
+appId: com.duckduckgo.mobile.android
+---
+- tapOn:
+      id: "com.duckduckgo.mobile.android:id/browserMenuImageView"
+- tapOn: "Autofill Logins"
+- assertVisible:
+    text: "No logins saved yet"
+- assertNotVisible:
+    id: searchLogins

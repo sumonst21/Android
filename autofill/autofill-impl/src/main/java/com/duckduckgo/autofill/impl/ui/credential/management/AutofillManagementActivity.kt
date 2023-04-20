@@ -90,7 +90,7 @@ class AutofillManagementActivity : DuckDuckGoActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        //window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         setContentView(binding.root)
         setupToolbar(binding.toolbar)
         observeViewModel()
