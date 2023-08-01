@@ -21,6 +21,7 @@ import com.duckduckgo.mobile.android.vpn.VpnFeaturesRegistry
 import com.duckduckgo.networkprotection.api.NetworkProtectionState
 import com.duckduckgo.networkprotection.impl.NetPVpnFeature
 import com.duckduckgo.networkprotection.impl.waitlist.store.NetPWaitlistRepository
+import com.duckduckgo.networkprotection.store.NetworkProtectionRepository
 import com.squareup.anvil.annotations.ContributesBinding
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
@@ -31,6 +32,7 @@ class NetworkProtectionStateImpl @Inject constructor(
     private val vpnFeaturesRegistry: VpnFeaturesRegistry,
     private val coroutineScope: CoroutineScope,
     private val netPWaitlistRepository: NetPWaitlistRepository,
+    private val networkProtectionRepository: NetworkProtectionRepository,
 ) : NetworkProtectionState {
     override fun isAuthenticated(): Boolean {
         return netPWaitlistRepository.getAuthenticationToken() != null
@@ -48,5 +50,9 @@ class NetworkProtectionStateImpl @Inject constructor(
         coroutineScope.launch {
             vpnFeaturesRegistry.refreshFeature(NetPVpnFeature.NETP_VPN)
         }
+    }
+
+    override fun serverLocation(): String? {
+        return networkProtectionRepository.serverDetails?.location
     }
 }
